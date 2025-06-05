@@ -15,6 +15,9 @@ wss.on("connection", (ws) => {
 
       if (data.type === "join") {
         players[id].name = data.name;
+
+        // Send back player's unique id so client can identify themselves
+        ws.send(JSON.stringify({ type: "init", id }));
       }
 
       if (data.type === "move") {
@@ -30,7 +33,7 @@ wss.on("connection", (ws) => {
     delete players[id];
   });
 
-  // Broadcast loop
+  // Broadcast all players positions to every connected client 15 times per second
   const interval = setInterval(() => {
     const payload = JSON.stringify({
       type: "players",
@@ -42,8 +45,12 @@ wss.on("connection", (ws) => {
         client.send(payload);
       }
     });
-  }, 1000 / 15); // 15 times per second
-});
+  }, 1000 / 15);
 
+  ws.on("close", () => {
+    clearInterval(interval);
+    delete players[id];
+  });
+});
 
 
