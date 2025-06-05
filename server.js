@@ -7,12 +7,7 @@ const players = {};
 
 wss.on("connection", (ws) => {
   const id = uuidv4();
-  players[id] = {
-    id,
-    name: "Unknown",
-    x: 2500,
-    y: 2500
-  };
+  players[id] = { x: 2500, y: 2500, name: "Unknown", id };
 
   ws.on("message", (message) => {
     try {
@@ -35,17 +30,20 @@ wss.on("connection", (ws) => {
     delete players[id];
   });
 
-  // Broadcast all players every 1/15 second
+  // Broadcast loop
   const interval = setInterval(() => {
     const payload = JSON.stringify({
       type: "players",
       players: Object.values(players)
     });
 
-    if (ws.readyState === WebSocket.OPEN) {
-      ws.send(payload);
-    }
-  }, 1000 / 15);
+    wss.clients.forEach((client) => {
+      if (client.readyState === WebSocket.OPEN) {
+        client.send(payload);
+      }
+    });
+  }, 1000 / 15); // 15 times per second
 });
+
 
 
