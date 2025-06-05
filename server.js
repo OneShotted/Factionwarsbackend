@@ -1,60 +1,28 @@
-const WebSocket = require('ws');
-const http = require('http');
-const PORT = process.env.PORT || 3000;
+const WebSocket = require("ws");
+const PORT = process.env.PORT || 8080;
 
-const server = http.createServer();
-const wss = new WebSocket.Server({ server });
+const wss = new WebSocket.Server({ port: PORT });
 
 let players = {};
-let idCounter = 0;
 
-wss.on('connection', (socket) => {
-  const playerId = `player_${idCounter++}`;
-  console.log(`[+] New connection: ${playerId}`);
+wss.on("connection", (ws) => {
+  let playerId = Math.random().toString(36).substr(2, 9);
+  players[playerId] = { id: playerId };
 
-  socket.on('message', (data) => {
-    let message;
-    try {
-      message = JSON.parse(data);
-    } catch (e) {
-      return;
-    }
-
-    if (message.type === 'join') {
-      players[playerId] = {
-        id: playerId,
-        name: message.name,
-        faction: message.faction,
-        x: Math.random() * 800,
-        y: Math.random() * 600,
-      };
-      console.log(`[JOIN] ${message.name} (${message.faction}) joined as ${playerId}`);
+  ws.on("message", (message) => {
+    const data = JSON.parse(message);
+    if (data.type === "join") {
+      players[playerId].name = data.name;
+      console.log(`${data.name} joined.`);
     }
   });
 
-  socket.on('close', () => {
-    console.log(`[-] Disconnected: ${playerId}`);
+  ws.on("close", () => {
     delete players[playerId];
   });
 
-  // Attach ID to socket
-  socket.id = playerId;
+  ws.send(JSON.stringify({ type: "welcome", id: playerId }));
 });
 
-// Broadcast loop
-setInterval(() => {
-  const payload = JSON.stringify({
-    type: 'state',
-    players: players
-  });
+console.log("Server running...");
 
-  wss.clients.forEach(client => {
-    if (client.readyState === WebSocket.OPEN) {
-      client.send(payload);
-    }
-  });
-}, 50);
-
-server.listen(PORT, () => {
-  console.log(`FactionWars.io server running on port ${PORT}`);
-});
