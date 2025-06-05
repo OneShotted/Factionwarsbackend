@@ -1,95 +1,92 @@
+// server.js
 const WebSocket = require('ws');
-const { v4: uuidv4 } = require('uuid');
-
 const wss = new WebSocket.Server({ port: 8080 });
-const players = {};
-const sockets = {};
 
-console.log('Server started on port 8080');
+const players = {}; // playerId -> player data
+
+// Utility: generate unique player IDs
+function generateId() {
+  return Math.random().toString(36).substr(2, 9);
+}
+
+function broadcastUpdate() {
+  const updateData = {
+    players: Object.values(players).map(p => ({
+      id: p.id,
+      x: p.x,
+      y: p.y,
+      faction: p.faction,
+      name: p.name,
+      inventory: p.inventory,
+      isDev: p.isDev
+    }))
+  };
+
+  const msg = JSON.stringify({ type: 'update', data: updateData });
+
+  wss.clients.forEach(client => {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(msg);
+    }
+  });
+}
 
 wss.on('connection', (ws) => {
-  const id = uuidv4();
-  sockets[id] = ws;
+  // Initialize new player
+  const playerId = generateId();
 
+  // Create default player data
+  players[playerId] = {
+    id: playerId,
+    x: Math.random() * 800,
+    y: Math.random() * 600,
+    faction: 'red',   // default faction, can be set by client later
+    name: 'Anonymous',
+    inventory: [
+      { name: 'Basic', icon: '⚪' }  // default inventory with "Basic" item
+    ],
+    isDev: false
+  };
+
+  // Send back initial info (your player id)
+  ws.send(JSON.stringify({ type: 'init', data: { id: playerId } }));
+
+  // Listen for messages from this client
   ws.on('message', (message) => {
-    let data;
+    let msg = null;
     try {
-      data = JSON.parse(message);
-    } catch (err) {
-      console.error('Invalid JSON:', message);
+      msg = JSON.parse(message);
+    } catch (e) {
+      console.error('Invalid JSON from client:', message);
       return;
     }
 
-    if (data.type === 'register') {
-      let name = data.name;
-      let isDev = false;
-      if (name.includes('#1627')) {
-        isDev = true;
-        name = name.replace('#1627', '');
-      }
+    if (!msg.type) return;
 
-      // NEW: read faction from client (default to "red" if missing)
-      const faction = data.faction || 'red';
+    if (msg.type === 'updatePlayer') {
+      const data = msg.data;
+      if (!players[playerId]) return;
 
-      players[id] = {
-        id,
-        name,
-        x: 0,
-        y: 0,
-        isDev,
-        faction    // store faction in player data
-      };
+      // Update player position & info
+      if (typeof data.x === 'number') players[playerId].x = data.x;
+      if (typeof data.y === 'number') players[playerId].y = data.y;
+      if (typeof data.name === 'string') players[playerId].name = data.name;
+      if (typeof data.faction === 'string') players[playerId].faction = data.faction;
+      if (Array.isArray(data.inventory)) players[playerId].inventory = data.inventory;
 
-      // Send back the newly assigned id
-      ws.send(JSON.stringify({ type: 'id', id }));
-      broadcastState();
+      // You can add more fields as needed
     }
-    else if (data.type === 'leaveGame') {
-      delete players[id];
-      delete sockets[id];
-      broadcastState();
-    }
-    else if (data.type === 'movementState') {
-      if (!players[id]) return;
 
-      const speed = players[id].isDev ? 5 : 2;
-      const keys = data.keys || {};
+    // Add other message handling as needed (chat, dev commands, etc.)
+  });
 
-      if (keys.up) players[id].y -= speed;
-      if (keys.down) players[id].y += speed;
-      if (keys.left) players[id].x -= speed;
-      if (keys.right) players[id].x += speed;
+  ws.on('close', () => {
+    delete players[playerId];
+  });
+});
 
-      broadcastState();
-    }
-    else if (data.type === 'chat') {
-      const player = players[id];
-      if (!player) return;
-      const messageToSend = {
-        type: 'chat',
-        name: player.name,
-        message: data.message,
-        isBroadcast: false
-      };
-      broadcast(messageToSend);
-    }
-    else if (data.type === 'devCommand') {
-      const player = players[id];
-      if (!player || !player.isDev) return;
+// Broadcast updates 20 times per second
+setInterval(broadcastUpdate, 1000 / 20);
 
-      if (data.command === 'kick') {
-        const targetId = data.targetId;
-        if (players[targetId] && sockets[targetId]) {
-          sockets[targetId].send(JSON.stringify({
-            type: 'kicked',
-            reason: 'You were kicked by a developer.'
-          }));
-          sockets[targetId].close(4000, 'Kicked by developer');
-          delete players[targetId];
-          delete sockets[targetId];
-          broadcastState();
-        }
-      }
-      else if (data.command === 'teleport') {
-        const targetId = data.ta
+console.log('Server started on ws://localhost:8080');
 
