@@ -28,16 +28,19 @@ wss.on('connection', (ws) => {
         name = name.replace('#1627', '');
       }
 
+      // —––––– NEW: read faction from client (default to "red" if missing)
+      const faction = data.faction || 'red';
+
       players[id] = {
         id,
         name,
-        //x: Math.random() * 1000,
-        //y: Math.random() * 1000,
         x: 0,
         y: 0,
-        isDev
+        isDev,
+        faction     // ←––– NEW: store faction in server state
       };
 
+      // Send back the newly assigned id
       ws.send(JSON.stringify({ type: 'id', id }));
       broadcastState();
     }
@@ -49,7 +52,7 @@ wss.on('connection', (ws) => {
     else if (data.type === 'movementState') {
       if (!players[id]) return;
 
-      const speed = players[id].isDev ? 5 : 2; // ✅ Speed boost for devs
+      const speed = players[id].isDev ? 5 : 2;
       const keys = data.keys || {};
 
       if (keys.up) players[id].y -= speed;
@@ -59,7 +62,6 @@ wss.on('connection', (ws) => {
 
       broadcastState();
     }
-
     else if (data.type === 'chat') {
       const player = players[id];
       if (!player) return;
@@ -71,7 +73,6 @@ wss.on('connection', (ws) => {
       };
       broadcast(messageToSend);
     }
-
     else if (data.type === 'devCommand') {
       const player = players[id];
       if (!player || !player.isDev) return;
@@ -79,23 +80,17 @@ wss.on('connection', (ws) => {
       if (data.command === 'kick') {
         const targetId = data.targetId;
         if (players[targetId] && sockets[targetId]) {
-          // Notify the target before closing
+          // Tell them they were kicked, then close
           sockets[targetId].send(JSON.stringify({
             type: 'kicked',
             reason: 'You were kicked by a developer.'
           }));
-
-          // Close the socket with a custom code
           sockets[targetId].close(4000, 'Kicked by developer');
-
-          // Cleanup
           delete players[targetId];
           delete sockets[targetId];
-
           broadcastState();
         }
       }
-
       else if (data.command === 'teleport') {
         const targetId = data.targetId;
         const x = data.x || 0;
@@ -106,7 +101,6 @@ wss.on('connection', (ws) => {
           broadcastState();
         }
       }
-
       else if (data.command === 'broadcast') {
         const message = data.message || '';
         const broadcastMessage = {
@@ -127,6 +121,7 @@ wss.on('connection', (ws) => {
 });
 
 function broadcastState() {
+  // We already have `players[id].faction` in each object
   const state = {
     type: 'update',
     players
@@ -142,6 +137,7 @@ function broadcast(data) {
     }
   });
 }
+
 
 
 
