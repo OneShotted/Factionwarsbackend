@@ -28,7 +28,7 @@ wss.on('connection', (ws) => {
         name = name.replace('#1627', '');
       }
 
-      // —––––– NEW: read faction from client (default to "red" if missing)
+      // NEW: read faction from client (default to "red" if missing)
       const faction = data.faction || 'red';
 
       players[id] = {
@@ -37,7 +37,7 @@ wss.on('connection', (ws) => {
         x: 0,
         y: 0,
         isDev,
-        faction     // ←––– NEW: store faction in server state
+        faction    // store faction in player data
       };
 
       // Send back the newly assigned id
@@ -80,7 +80,6 @@ wss.on('connection', (ws) => {
       if (data.command === 'kick') {
         const targetId = data.targetId;
         if (players[targetId] && sockets[targetId]) {
-          // Tell them they were kicked, then close
           sockets[targetId].send(JSON.stringify({
             type: 'kicked',
             reason: 'You were kicked by a developer.'
@@ -92,53 +91,5 @@ wss.on('connection', (ws) => {
         }
       }
       else if (data.command === 'teleport') {
-        const targetId = data.targetId;
-        const x = data.x || 0;
-        const y = data.y || 0;
-        if (players[targetId]) {
-          players[targetId].x = x;
-          players[targetId].y = y;
-          broadcastState();
-        }
-      }
-      else if (data.command === 'broadcast') {
-        const message = data.message || '';
-        const broadcastMessage = {
-          type: 'chat',
-          message: `[Broadcast] ${message}`,
-          isBroadcast: true
-        };
-        broadcast(broadcastMessage);
-      }
-    }
-  });
-
-  ws.on('close', () => {
-    delete players[id];
-    delete sockets[id];
-    broadcastState();
-  });
-});
-
-function broadcastState() {
-  // We already have `players[id].faction` in each object
-  const state = {
-    type: 'update',
-    players
-  };
-  broadcast(state);
-}
-
-function broadcast(data) {
-  const msg = JSON.stringify(data);
-  Object.values(sockets).forEach((ws) => {
-    if (ws.readyState === WebSocket.OPEN) {
-      ws.send(msg);
-    }
-  });
-}
-
-
-
-
+        const targetId = data.ta
 
