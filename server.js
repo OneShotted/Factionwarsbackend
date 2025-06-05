@@ -3,7 +3,6 @@ const WebSocket = require('ws');
 const port = process.env.PORT || 8080;
 const wss = new WebSocket.Server({ port });
 
-
 let players = {}; // key: playerId, value: { ws, name, x, y, faction, isDev }
 
 let nextId = 1;
@@ -25,7 +24,6 @@ function sendTo(ws, data) {
 }
 
 function generateRandomPosition() {
-  // You can customize spawn area as needed
   return {
     x: Math.floor(Math.random() * 2000),
     y: Math.floor(Math.random() * 2000),
@@ -41,9 +39,9 @@ wss.on('connection', (ws) => {
     y: 0,
     faction: null,
     isDev: false,
+    inventory: [] // initialize empty inventory
   };
 
-  // Send id to player
   sendTo(ws, { type: 'id', id: playerId });
 
   ws.on('message', (msg) => {
@@ -61,7 +59,6 @@ wss.on('connection', (ws) => {
           let isDev = false;
           let name = nameRaw;
 
-          // Check for dev code '#1627'
           if (nameRaw.includes('#1627')) {
             isDev = true;
             name = nameRaw.replace('#1627', '');
@@ -71,12 +68,10 @@ wss.on('connection', (ws) => {
           players[playerId].faction = data.faction || 'red';
           players[playerId].isDev = isDev;
 
-          // Assign random position on registration
           const pos = generateRandomPosition();
           players[playerId].x = pos.x;
           players[playerId].y = pos.y;
 
-          // Broadcast updated players to all
           broadcast({
             type: 'update',
             players: mapPlayers(),
@@ -87,10 +82,13 @@ wss.on('connection', (ws) => {
       case 'movementState':
         {
           const keys = data.keys || {};
+          const inventory = data.inventory || [];
           const p = players[playerId];
           if (!p) return;
 
-          // Basic movement speed
+          // Store inventory from client
+          p.inventory = inventory;
+
           const speed = 5;
 
           if (keys.up) p.y -= speed;
@@ -98,7 +96,6 @@ wss.on('connection', (ws) => {
           if (keys.left) p.x -= speed;
           if (keys.right) p.x += speed;
 
-          // Clamp position to some map bounds (optional)
           if (p.x < 0) p.x = 0;
           if (p.y < 0) p.y = 0;
           if (p.x > 3000) p.x = 3000;
@@ -112,7 +109,6 @@ wss.on('connection', (ws) => {
           if (!p) return;
           const message = data.message?.toString().substring(0, 200) || '';
 
-          // Broadcast chat to all players
           broadcast({
             type: 'chat',
             name: p.name,
@@ -126,7 +122,6 @@ wss.on('connection', (ws) => {
         {
           const p = players[playerId];
           if (!p || !p.isDev) {
-            // Ignore if not dev
             return;
           }
 
@@ -185,7 +180,6 @@ wss.on('connection', (ws) => {
   });
 });
 
-// Helper: create player data map without WS objects for broadcast
 function mapPlayers() {
   const result = {};
   for (const id in players) {
@@ -196,18 +190,18 @@ function mapPlayers() {
       y: p.y,
       faction: p.faction,
       isDev: p.isDev,
+      inventory: p.inventory || []
     };
   }
   return result;
 }
 
-// Periodically send update of all players to everyone
 setInterval(() => {
   broadcast({
     type: 'update',
     players: mapPlayers(),
   });
-}, 1000 / 20); // 20 times per second
+}, 1000 / 20);
 
 console.log('WebSocket server started on port 8080');
 
