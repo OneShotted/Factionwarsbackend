@@ -44,16 +44,17 @@ wss.on('connection', (ws) => {
   });
 });
 
-// Movement + state broadcast loop
+// Movement + state broadcast loop (30 FPS)
 setInterval(() => {
+  const speed = 3;
+
   for (let id in players) {
     const p = players[id];
-    const speed = 3;
 
-    if (p.keys?.w) p.y -= speed;
-    if (p.keys?.s) p.y += speed;
-    if (p.keys?.a) p.x -= speed;
-    if (p.keys?.d) p.x += speed;
+    if (p.keys?.w) p.y -= speed; // Move up (y--)
+    if (p.keys?.s) p.y += speed; // Move down (y++)
+    if (p.keys?.a) p.x -= speed; // Move left (x--)
+    if (p.keys?.d) p.x += speed; // Move right (x++)
   }
 
   const state = {
@@ -68,5 +69,4 @@ setInterval(() => {
       client.send(str);
     }
   });
-}, 1000 / 30); // 30 FPS
-
+}, 1000 / 30);
