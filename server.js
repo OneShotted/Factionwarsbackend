@@ -1,92 +1,211 @@
-// server.js
 const WebSocket = require('ws');
+
 const wss = new WebSocket.Server({ port: 8080 });
 
-const players = {}; // playerId -> player data
+let players = {}; // key: playerId, value: { ws, name, x, y, faction, isDev }
 
-// Utility: generate unique player IDs
-function generateId() {
-  return Math.random().toString(36).substr(2, 9);
+let nextId = 1;
+
+function broadcast(data) {
+  const str = JSON.stringify(data);
+  for (const id in players) {
+    const p = players[id];
+    if (p.ws.readyState === WebSocket.OPEN) {
+      p.ws.send(str);
+    }
+  }
 }
 
-function broadcastUpdate() {
-  const updateData = {
-    players: Object.values(players).map(p => ({
-      id: p.id,
-      x: p.x,
-      y: p.y,
-      faction: p.faction,
-      name: p.name,
-      inventory: p.inventory,
-      isDev: p.isDev
-    }))
+function sendTo(ws, data) {
+  if (ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify(data));
+  }
+}
+
+function generateRandomPosition() {
+  // You can customize spawn area as needed
+  return {
+    x: Math.floor(Math.random() * 2000),
+    y: Math.floor(Math.random() * 2000),
   };
-
-  const msg = JSON.stringify({ type: 'update', data: updateData });
-
-  wss.clients.forEach(client => {
-    if (client.readyState === WebSocket.OPEN) {
-      client.send(msg);
-    }
-  });
 }
 
 wss.on('connection', (ws) => {
-  // Initialize new player
-  const playerId = generateId();
-
-  // Create default player data
+  const playerId = nextId++;
   players[playerId] = {
-    id: playerId,
-    x: Math.random() * 800,
-    y: Math.random() * 600,
-    faction: 'red',   // default faction, can be set by client later
-    name: 'Anonymous',
-    inventory: [
-      { name: 'Basic', icon: '⚪' }  // default inventory with "Basic" item
-    ],
-    isDev: false
+    ws,
+    name: null,
+    x: 0,
+    y: 0,
+    faction: null,
+    isDev: false,
   };
 
-  // Send back initial info (your player id)
-  ws.send(JSON.stringify({ type: 'init', data: { id: playerId } }));
+  // Send id to player
+  sendTo(ws, { type: 'id', id: playerId });
 
-  // Listen for messages from this client
-  ws.on('message', (message) => {
-    let msg = null;
+  ws.on('message', (msg) => {
+    let data;
     try {
-      msg = JSON.parse(message);
-    } catch (e) {
-      console.error('Invalid JSON from client:', message);
+      data = JSON.parse(msg);
+    } catch {
       return;
     }
 
-    if (!msg.type) return;
+    switch (data.type) {
+      case 'register':
+        {
+          const nameRaw = data.name || '';
+          let isDev = false;
+          let name = nameRaw;
 
-    if (msg.type === 'updatePlayer') {
-      const data = msg.data;
-      if (!players[playerId]) return;
+          // Check for dev code '#1627'
+          if (nameRaw.includes('#1627')) {
+            isDev = true;
+            name = nameRaw.replace('#1627', '');
+          }
 
-      // Update player position & info
-      if (typeof data.x === 'number') players[playerId].x = data.x;
-      if (typeof data.y === 'number') players[playerId].y = data.y;
-      if (typeof data.name === 'string') players[playerId].name = data.name;
-      if (typeof data.faction === 'string') players[playerId].faction = data.faction;
-      if (Array.isArray(data.inventory)) players[playerId].inventory = data.inventory;
+          players[playerId].name = name;
+          players[playerId].faction = data.faction || 'red';
+          players[playerId].isDev = isDev;
 
-      // You can add more fields as needed
+          // Assign random position on registration
+          const pos = generateRandomPosition();
+          players[playerId].x = pos.x;
+          players[playerId].y = pos.y;
+
+          // Broadcast updated players to all
+          broadcast({
+            type: 'update',
+            players: mapPlayers(),
+          });
+        }
+        break;
+
+      case 'movementState':
+        {
+          const keys = data.keys || {};
+          const p = players[playerId];
+          if (!p) return;
+
+          // Basic movement speed
+          const speed = 5;
+
+          if (keys.up) p.y -= speed;
+          if (keys.down) p.y += speed;
+          if (keys.left) p.x -= speed;
+          if (keys.right) p.x += speed;
+
+          // Clamp position to some map bounds (optional)
+          if (p.x < 0) p.x = 0;
+          if (p.y < 0) p.y = 0;
+          if (p.x > 3000) p.x = 3000;
+          if (p.y > 3000) p.y = 3000;
+        }
+        break;
+
+      case 'chat':
+        {
+          const p = players[playerId];
+          if (!p) return;
+          const message = data.message?.toString().substring(0, 200) || '';
+
+          // Broadcast chat to all players
+          broadcast({
+            type: 'chat',
+            name: p.name,
+            message,
+            isBroadcast: false,
+          });
+        }
+        break;
+
+      case 'devCommand':
+        {
+          const p = players[playerId];
+          if (!p || !p.isDev) {
+            // Ignore if not dev
+            return;
+          }
+
+          const command = data.command;
+          if (command === 'broadcast') {
+            const msg = data.message || '';
+            broadcast({
+              type: 'chat',
+              message: msg,
+              isBroadcast: true,
+            });
+          } else if (command === 'kick') {
+            const targetId = data.targetId;
+            if (players[targetId]) {
+              sendTo(players[targetId].ws, {
+                type: 'kicked',
+                reason: 'Kicked by developer',
+              });
+              players[targetId].ws.close();
+              delete players[targetId];
+              broadcast({
+                type: 'update',
+                players: mapPlayers(),
+              });
+            }
+          } else if (command === 'teleport') {
+            const targetId = data.targetId;
+            const x = Number(data.x);
+            const y = Number(data.y);
+            if (players[targetId] && !isNaN(x) && !isNaN(y)) {
+              players[targetId].x = x;
+              players[targetId].y = y;
+              broadcast({
+                type: 'update',
+                players: mapPlayers(),
+              });
+            }
+          }
+        }
+        break;
+
+      case 'leaveGame':
+        {
+          ws.close();
+        }
+        break;
     }
-
-    // Add other message handling as needed (chat, dev commands, etc.)
   });
 
   ws.on('close', () => {
     delete players[playerId];
+    broadcast({
+      type: 'update',
+      players: mapPlayers(),
+    });
   });
 });
 
-// Broadcast updates 20 times per second
-setInterval(broadcastUpdate, 1000 / 20);
+// Helper: create player data map without WS objects for broadcast
+function mapPlayers() {
+  const result = {};
+  for (const id in players) {
+    const p = players[id];
+    result[id] = {
+      name: p.name,
+      x: p.x,
+      y: p.y,
+      faction: p.faction,
+      isDev: p.isDev,
+    };
+  }
+  return result;
+}
 
-console.log('Server started on ws://localhost:8080');
+// Periodically send update of all players to everyone
+setInterval(() => {
+  broadcast({
+    type: 'update',
+    players: mapPlayers(),
+  });
+}, 1000 / 20); // 20 times per second
+
+console.log('WebSocket server started on port 8080');
 
