@@ -1,28 +1,51 @@
 const WebSocket = require("ws");
-const PORT = process.env.PORT || 8080;
+const { v4: uuidv4 } = require("uuid");
 
-const wss = new WebSocket.Server({ port: PORT });
+const wss = new WebSocket.Server({ port: process.env.PORT || 8080 });
 
-let players = {};
+const players = {};
 
 wss.on("connection", (ws) => {
-  let playerId = Math.random().toString(36).substr(2, 9);
-  players[playerId] = { id: playerId };
+  const id = uuidv4();
+  players[id] = {
+    id,
+    name: "Unknown",
+    x: 2500,
+    y: 2500
+  };
 
   ws.on("message", (message) => {
-    const data = JSON.parse(message);
-    if (data.type === "join") {
-      players[playerId].name = data.name;
-      console.log(`${data.name} joined.`);
+    try {
+      const data = JSON.parse(message);
+
+      if (data.type === "join") {
+        players[id].name = data.name;
+      }
+
+      if (data.type === "move") {
+        players[id].x = data.x;
+        players[id].y = data.y;
+      }
+    } catch (e) {
+      console.error("Invalid message:", message);
     }
   });
 
   ws.on("close", () => {
-    delete players[playerId];
+    delete players[id];
   });
 
-  ws.send(JSON.stringify({ type: "welcome", id: playerId }));
+  // Broadcast all players every 1/15 second
+  const interval = setInterval(() => {
+    const payload = JSON.stringify({
+      type: "players",
+      players: Object.values(players)
+    });
+
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.send(payload);
+    }
+  }, 1000 / 15);
 });
 
-console.log("Server running...");
 
