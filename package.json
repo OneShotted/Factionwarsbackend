@@ -1,15 +1,11 @@
 {
-  "name": "factionwars-backend",
+  "name": "factionwars-server",
   "version": "1.0.0",
-  "description": "WebSocket backend for FactionWars.io",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
   },
   "dependencies": {
-    "ws": "^8.15.1"
-  },
-  "engines": {
-    "node": ">=16.0.0"
+    "ws": "^8.0.0"
   }
 }
