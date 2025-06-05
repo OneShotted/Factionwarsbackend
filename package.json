@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node server.js"
   },
-  "author": "YourName",
+  "author": "CharmedZ",
   "license": "MIT",
   "dependencies": {
     "ws": "^8.13.0",
