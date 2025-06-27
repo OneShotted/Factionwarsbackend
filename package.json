@@ -1,16 +1,12 @@
 {
-  "name": "factionwars-backend",
+  "name": "mmo-3d-server",
   "version": "1.0.0",
-  "description": "Backend WebSocket server for FactionWars.io",
   "main": "server.js",
+  "dependencies": {
+    "uuid": "^9.0.1",
+    "ws": "^8.15.1"
+  },
   "scripts": {
     "start": "node server.js"
-  },
-  "author": "CharmedZ",
-  "license": "MIT",
-  "dependencies": {
-    "ws": "^8.13.0",
-    "uuid": "^9.0.0"
   }
 }
-
