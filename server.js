@@ -14,7 +14,12 @@ wss.on('connection', (ws) => {
     try {
       const data = JSON.parse(message);
       if (data.type === 'move' && data.position) {
-        players[id] = data.position;
+        players[id] = {
+  x: data.position.x,
+  y: data.position.y,
+  z: data.position.z,
+  rotY: data.position.rotY || 0
+};
 
         const payload = JSON.stringify({ type: 'update', players });
         wss.clients.forEach((client) => {
