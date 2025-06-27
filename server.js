@@ -1,72 +1,40 @@
 const WebSocket = require('ws');
 const { v4: uuidv4 } = require('uuid');
 
-const PORT = process.env.PORT || 3000;
-const wss = new WebSocket.Server({ port: PORT });
-
+const wss = new WebSocket.Server({ port: process.env.PORT || 3000 });
 const players = {};
-
-console.log(`WebSocket server running on port ${PORT}`);
 
 wss.on('connection', (ws) => {
   const id = uuidv4();
-  players[id] = {
-    id,
-    x: 300,
-    y: 300,
-    username: '',
-    faction: '',
-    keys: {}
-  };
+  players[id] = { x: 0, y: 1, z: 0 };
 
   ws.send(JSON.stringify({ type: 'init', id }));
 
-  ws.on('message', (data) => {
-    let msg;
+  ws.on('message', (message) => {
     try {
-      msg = JSON.parse(data);
-    } catch {
-      return;
-    }
+      const data = JSON.parse(message);
+      if (data.type === 'move' && data.position) {
+        players[id] = data.position;
 
-    if (msg.type === 'join') {
-      players[id].username = msg.username;
-      players[id].faction = msg.faction;
-    }
-
-    if (msg.type === 'move') {
-      players[id].keys = msg.keys;
+        const payload = JSON.stringify({ type: 'update', players });
+        wss.clients.forEach((client) => {
+          if (client.readyState === WebSocket.OPEN) {
+            client.send(payload);
+          }
+        });
+      }
+    } catch (e) {
+      console.error('Invalid message', e);
     }
   });
 
   ws.on('close', () => {
     delete players[id];
+    const payload = JSON.stringify({ type: 'update', players });
+    wss.clients.forEach((client) => {
+      if (client.readyState === WebSocket.OPEN) {
+        client.send(payload);
+      }
+    });
   });
 });
-
-// Movement + state broadcast loop (30 FPS)
-setInterval(() => {
-  const speed = 3;
-
-  for (let id in players) {
-    const p = players[id];
-
-    if (p.keys?.w) p.y -= speed; // Move up (y--)
-    if (p.keys?.s) p.y += speed; // Move down (y++)
-    if (p.keys?.a) p.x -= speed; // Move left (x--)
-    if (p.keys?.d) p.x += speed; // Move right (x++)
-  }
-
-  const state = {
-    type: 'state',
-    players
-  };
-
-  const str = JSON.stringify(state);
-
-  wss.clients.forEach(client => {
-    if (client.readyState === WebSocket.OPEN) {
-      client.send(str);
-    }
-  });
-}, 1000 / 30);
