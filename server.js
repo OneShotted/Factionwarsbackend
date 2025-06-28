@@ -1,35 +1,44 @@
 const WebSocket = require('ws');
-const { Pool } = require('pg');
+const fs = require('fs');
+const path = require('path');
 const bcrypt = require('bcrypt');
 const { v4: uuidv4 } = require('uuid');
 
 const wss = new WebSocket.Server({ port: process.env.PORT || 3000 });
 
-// PostgreSQL connection pool using Supabase DATABASE_URL env var
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: {
-    rejectUnauthorized: false, // Required for Supabase SSL
-  },
-  family: 4, // Force IPv4 to avoid ENETUNREACH IPv6 error on some hosts
-});
+const usersFile = path.join(__dirname, 'users.json');
+let users = {};
+
+// Load users from file (if exists)
+try {
+  const data = fs.readFileSync(usersFile, 'utf8');
+  users = JSON.parse(data);
+  console.log('Loaded users:', Object.keys(users).length);
+} catch (e) {
+  console.log('No existing users.json, starting fresh.');
+  users = {};
+}
+
+// Save users to file (async)
+function saveUsers() {
+  fs.writeFile(usersFile, JSON.stringify(users, null, 2), (err) => {
+    if (err) console.error('Error saving users.json:', err);
+  });
+}
 
 const players = {}; // In-memory player positions keyed by id
 
 // Helper: find user by username
-async function findUserByUsername(username) {
-  const res = await pool.query('SELECT * FROM users WHERE username = $1', [username]);
-  return res.rows[0];
+function findUserByUsername(username) {
+  return Object.values(users).find(u => u.username === username);
 }
 
 // Helper: create new user
 async function createUser(username, password) {
   const hashed = await bcrypt.hash(password, 10);
   const id = uuidv4();
-  await pool.query(
-    'INSERT INTO users (id, username, password_hash) VALUES ($1, $2, $3)',
-    [id, username, hashed]
-  );
+  users[id] = { id, username, password_hash: hashed };
+  saveUsers();
   return { id, username };
 }
 
@@ -50,7 +59,7 @@ wss.on('connection', (ws) => {
 
       // Handle signup
       if (data.type === 'signup' && data.username && data.password) {
-        const existingUser = await findUserByUsername(data.username);
+        const existingUser = findUserByUsername(data.username);
         if (existingUser) {
           ws.send(JSON.stringify({ type: 'signup', success: false, error: 'Username taken' }));
           return;
@@ -66,7 +75,7 @@ wss.on('connection', (ws) => {
 
       // Handle login
       if (data.type === 'login' && data.username && data.password) {
-        const user = await findUserByUsername(data.username);
+        const user = findUserByUsername(data.username);
         if (!user) {
           ws.send(JSON.stringify({ type: 'login', success: false, error: 'User not found' }));
           return;
@@ -123,4 +132,3 @@ wss.on('connection', (ws) => {
 });
 
 console.log('WebSocket server running on port', process.env.PORT || 3000);
-
