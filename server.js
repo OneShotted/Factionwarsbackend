@@ -26,7 +26,7 @@ function saveUsers() {
   });
 }
 
-const players = {}; // In-memory player positions and states keyed by id
+const players = {}; // In-memory player positions keyed by id
 
 // Helper: find user by username
 function findUserByUsername(username) {
@@ -46,6 +46,25 @@ async function createUser(username, password) {
 async function verifyPassword(user, password) {
   return bcrypt.compare(password, user.password_hash);
 }
+
+// Broadcast all players on fixed interval to smooth movement
+const BROADCAST_INTERVAL = 50; // ms
+
+function broadcastPlayers() {
+  const payload = JSON.stringify({
+    type: 'update',
+    players,
+  });
+  wss.clients.forEach((client) => {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(payload);
+    }
+  });
+}
+
+setInterval(() => {
+  broadcastPlayers();
+}, BROADCAST_INTERVAL);
 
 wss.on('connection', (ws) => {
   let playerId = null;
@@ -67,9 +86,9 @@ wss.on('connection', (ws) => {
         const newUser = await createUser(data.username, data.password);
         playerId = newUser.id;
         username = newUser.username;
-        players[playerId] = { x: 0, y: 1, z: 0, rotY: 0, username, health: 100 };
+        players[playerId] = { x: 0, y: 1, z: 0, rotY: 0, username };
         ws.send(JSON.stringify({ type: 'signup', success: true, id: playerId, username }));
-        broadcastPlayers();
+        // don't broadcast here, interval will handle it
         return;
       }
 
@@ -87,58 +106,22 @@ wss.on('connection', (ws) => {
         }
         playerId = user.id;
         username = user.username;
-        players[playerId] = players[playerId] || { x: 0, y: 1, z: 0, rotY: 0, username, health: 100 };
+        players[playerId] = players[playerId] || { x: 0, y: 1, z: 0, rotY: 0, username };
         ws.send(JSON.stringify({ type: 'login', success: true, id: playerId, username }));
-        broadcastPlayers();
+        // don't broadcast here, interval will handle it
         return;
       }
 
       // Movement updates (only if logged in)
       if (data.type === 'move' && playerId && data.position) {
-        // Preserve existing health or set to 100 if missing
-        const currentHealth = (players[playerId] && players[playerId].health) || 100;
-
         players[playerId] = {
           x: data.position.x,
           y: data.position.y,
           z: data.position.z,
           rotY: data.position.rotY || 0,
           username,
-          health: currentHealth,
         };
-        broadcastPlayers();
-      }
-
-      // Handle attack messages
-      if (data.type === 'attack' && playerId && data.targetId) {
-        const attacker = players[playerId];
-        const target = players[data.targetId];
-
-        if (attacker && target) {
-          // Check distance between attacker and target (3D distance)
-          const dx = attacker.x - target.x;
-          const dy = attacker.y - target.y;
-          const dz = attacker.z - target.z;
-          const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
-
-          if (dist <= 4) { // Attack range threshold
-            // Reduce target health by 10
-            target.health = (target.health || 100) - 10;
-
-            if (target.health <= 0) {
-              // Respawn target at random position with full health
-              target.x = Math.random() * 100 - 50;
-              target.y = 1;
-              target.z = Math.random() * 100 - 50;
-              target.health = 100;
-              console.log(`Player ${target.username} was defeated and respawned.`);
-            }
-            broadcastPlayers();
-          } else {
-            // Optionally notify attacker target is out of range or ignore
-            // ws.send(JSON.stringify({ type: 'error', message: 'Target out of range' }));
-          }
-        }
+        // Removed broadcastPlayers() here for smoother movement
       }
 
     } catch (e) {
@@ -150,21 +133,10 @@ wss.on('connection', (ws) => {
   ws.on('close', () => {
     if (playerId) {
       delete players[playerId];
-      broadcastPlayers();
+      // Removed broadcastPlayers() here, interval will handle removing player from clients
     }
   });
-
-  function broadcastPlayers() {
-    const payload = JSON.stringify({
-      type: 'update',
-      players,
-    });
-    wss.clients.forEach((client) => {
-      if (client.readyState === WebSocket.OPEN) {
-        client.send(payload);
-      }
-    });
-  }
 });
 
 console.log('WebSocket server running on port', process.env.PORT || 3000);
+
