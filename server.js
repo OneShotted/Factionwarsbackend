@@ -14,7 +14,6 @@ wss.on('connection', (ws) => {
     try {
       const data = JSON.parse(message);
       if (data.type === 'move' && data.position) {
-        // Ensure rotY is always present
         players[id] = {
           x: data.position.x,
           y: data.position.y,
@@ -23,6 +22,8 @@ wss.on('connection', (ws) => {
         };
 
         const payload = JSON.stringify({ type: 'update', players });
+
+        // Broadcast to all clients
         wss.clients.forEach((client) => {
           if (client.readyState === WebSocket.OPEN) {
             client.send(payload);
