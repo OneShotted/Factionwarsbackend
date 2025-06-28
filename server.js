@@ -1,151 +1,125 @@
 const WebSocket = require('ws');
+const { Pool } = require('pg');
+const bcrypt = require('bcrypt');
 const { v4: uuidv4 } = require('uuid');
-const crypto = require('crypto');
-const fs = require('fs');
-const path = require('path');
 
 const wss = new WebSocket.Server({ port: process.env.PORT || 3000 });
 
-const usersFilePath = path.join(__dirname, 'users.json');
+// PostgreSQL connection pool using Supabase DATABASE_URL env var
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: {
+    rejectUnauthorized: false, // Required for Supabase SSL
+  },
+});
 
-// Load users from file or initialize empty object
-let users = {};
-try {
-  const data = fs.readFileSync(usersFilePath, 'utf8');
-  users = JSON.parse(data);
-  console.log(`Loaded ${Object.keys(users).length} user(s) from users.json`);
-} catch (err) {
-  if (err.code === 'ENOENT') {
-    console.log('users.json not found, starting with empty users list');
-  } else {
-    console.error('Error reading users.json:', err);
-  }
+const players = {}; // In-memory player positions keyed by id
+
+// Helper: find user by username
+async function findUserByUsername(username) {
+  const res = await pool.query('SELECT * FROM users WHERE username = $1', [username]);
+  return res.rows[0];
 }
 
-function saveUsersToFile() {
-  fs.writeFile(usersFilePath, JSON.stringify(users, null, 2), (err) => {
-    if (err) console.error('Error writing users.json:', err);
-  });
+// Helper: create new user
+async function createUser(username, password) {
+  const hashed = await bcrypt.hash(password, 10);
+  const id = uuidv4();
+  await pool.query(
+    'INSERT INTO users (id, username, password_hash) VALUES ($1, $2, $3)',
+    [id, username, hashed]
+  );
+  return { id, username };
 }
 
-function hashPassword(password) {
-  return crypto.createHash('sha256').update(password).digest('hex');
+// Helper: verify password
+async function verifyPassword(user, password) {
+  return bcrypt.compare(password, user.password_hash);
 }
-
-const players = {};
 
 wss.on('connection', (ws) => {
-  let loggedIn = false;
   let playerId = null;
   let username = null;
 
-  ws.on('message', (message) => {
+  ws.send(JSON.stringify({ type: 'connected' }));
+
+  ws.on('message', async (message) => {
     try {
       const data = JSON.parse(message);
 
-      if (data.type === 'signup') {
-        const { username: newUsername, password } = data;
-        if (!newUsername || !password) {
-          ws.send(JSON.stringify({ type: 'signupError', message: 'Username and password required.' }));
+      // Handle signup
+      if (data.type === 'signup' && data.username && data.password) {
+        const existingUser = await findUserByUsername(data.username);
+        if (existingUser) {
+          ws.send(JSON.stringify({ type: 'signup', success: false, error: 'Username taken' }));
           return;
         }
-        if (users[newUsername]) {
-          ws.send(JSON.stringify({ type: 'signupError', message: 'Username already taken.' }));
-          return;
-        }
-        // Save new user in memory and file
-        users[newUsername] = {
-          passwordHash: hashPassword(password),
-          id: uuidv4(),
-        };
-        saveUsersToFile();
-        ws.send(JSON.stringify({ type: 'signupSuccess', message: 'Account created! Please log in.' }));
-        return;
-      }
-
-      if (data.type === 'login') {
-        const { username: loginUsername, password } = data;
-        if (!loginUsername || !password) {
-          ws.send(JSON.stringify({ type: 'loginError', message: 'Username and password required.' }));
-          return;
-        }
-        const user = users[loginUsername];
-        if (!user) {
-          ws.send(JSON.stringify({ type: 'loginError', message: 'Invalid username or password.' }));
-          return;
-        }
-        if (user.passwordHash !== hashPassword(password)) {
-          ws.send(JSON.stringify({ type: 'loginError', message: 'Invalid username or password.' }));
-          return;
-        }
-
-        loggedIn = true;
-        playerId = user.id;
-        username = loginUsername;
-
-        if (!players[playerId]) {
-          players[playerId] = {
-            ws,
-            username,
-            position: { x: 0, y: 1, z: 0, rotY: 0 },
-          };
-        } else {
-          players[playerId].ws = ws;
-        }
-
-        ws.send(JSON.stringify({ type: 'loginSuccess', id: playerId, username }));
-
+        const newUser = await createUser(data.username, data.password);
+        playerId = newUser.id;
+        username = newUser.username;
+        players[playerId] = { x: 0, y: 1, z: 0, rotY: 0, username };
+        ws.send(JSON.stringify({ type: 'signup', success: true, id: playerId, username }));
         broadcastPlayers();
-
         return;
       }
 
-      if (data.type === 'move') {
-        if (!loggedIn) return;
-
-        if (data.position) {
-          players[playerId].position = {
-            x: data.position.x,
-            y: data.position.y,
-            z: data.position.z,
-            rotY: data.position.rotY || 0,
-          };
-          broadcastPlayers();
+      // Handle login
+      if (data.type === 'login' && data.username && data.password) {
+        const user = await findUserByUsername(data.username);
+        if (!user) {
+          ws.send(JSON.stringify({ type: 'login', success: false, error: 'User not found' }));
+          return;
         }
+        const valid = await verifyPassword(user, data.password);
+        if (!valid) {
+          ws.send(JSON.stringify({ type: 'login', success: false, error: 'Invalid password' }));
+          return;
+        }
+        playerId = user.id;
+        username = user.username;
+        players[playerId] = players[playerId] || { x: 0, y: 1, z: 0, rotY: 0, username };
+        ws.send(JSON.stringify({ type: 'login', success: true, id: playerId, username }));
+        broadcastPlayers();
+        return;
       }
+
+      // Movement updates (only if logged in)
+      if (data.type === 'move' && playerId && data.position) {
+        players[playerId] = {
+          x: data.position.x,
+          y: data.position.y,
+          z: data.position.z,
+          rotY: data.position.rotY || 0,
+          username,
+        };
+        broadcastPlayers();
+      }
+
     } catch (e) {
-      console.error('Invalid message', e);
+      console.error('Error processing message:', e);
+      ws.send(JSON.stringify({ type: 'error', message: 'Invalid message format or server error' }));
     }
   });
 
   ws.on('close', () => {
-    if (loggedIn && playerId && players[playerId]) {
+    if (playerId) {
       delete players[playerId];
       broadcastPlayers();
     }
   });
 
   function broadcastPlayers() {
-    const payload = {
+    const payload = JSON.stringify({
       type: 'update',
-      players: {},
-    };
-    for (const [id, player] of Object.entries(players)) {
-      payload.players[id] = {
-        x: player.position.x,
-        y: player.position.y,
-        z: player.position.z,
-        rotY: player.position.rotY,
-        username: player.username,
-      };
-    }
-    const msg = JSON.stringify(payload);
+      players,
+    });
     wss.clients.forEach((client) => {
       if (client.readyState === WebSocket.OPEN) {
-        client.send(msg);
+        client.send(payload);
       }
     });
   }
 });
 
-console.log(`WebSocket server running on port ${process.env.PORT || 3000}`);
+console.log('WebSocket server running on port', process.env.PORT || 3000);
+
