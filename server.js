@@ -11,6 +11,7 @@ const pool = new Pool({
   ssl: {
     rejectUnauthorized: false, // Required for Supabase SSL
   },
+  family: 4, // Force IPv4 to avoid ENETUNREACH IPv6 error on some hosts
 });
 
 const players = {}; // In-memory player positions keyed by id
