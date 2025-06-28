@@ -1,6 +1,7 @@
 {
   "name": "mmo-3d-server",
   "version": "1.0.0",
+  "description": "3D MMO game backend",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
@@ -10,5 +11,8 @@
     "ws": "^8.13.0",
     "uuid": "^9.0.0",
     "@supabase/supabase-js": "^2.29.1"
+  },
+  "engines": {
+    "node": ">=18"
   }
 }
