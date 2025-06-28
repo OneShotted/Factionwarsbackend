@@ -2,11 +2,13 @@
   "name": "mmo-3d-server",
   "version": "1.0.0",
   "main": "server.js",
-  "dependencies": {
-    "uuid": "^9.0.1",
-    "ws": "^8.15.1"
-  },
   "scripts": {
     "start": "node server.js"
+  },
+  "dependencies": {
+    "pg": "^8.10.0",
+    "ws": "^8.13.0",
+    "uuid": "^9.0.0",
+    "@supabase/supabase-js": "^2.29.1"
   }
 }
