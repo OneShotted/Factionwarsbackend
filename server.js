@@ -26,7 +26,7 @@ function saveUsers() {
   });
 }
 
-const players = {}; // playerId -> {x, y, z, rotY, username, health, lastAttackTime}
+const players = {}; // In-memory player positions and states keyed by id
 
 // Helper: find user by username
 function findUserByUsername(username) {
@@ -45,15 +45,6 @@ async function createUser(username, password) {
 // Helper: verify password
 async function verifyPassword(user, password) {
   return bcrypt.compare(password, user.password_hash);
-}
-
-// Helper: check distance between two players (for attack range)
-function distance(a, b) {
-  return Math.sqrt(
-    (a.x - b.x) ** 2 +
-    (a.y - b.y) ** 2 +
-    (a.z - b.z) ** 2
-  );
 }
 
 wss.on('connection', (ws) => {
@@ -76,7 +67,7 @@ wss.on('connection', (ws) => {
         const newUser = await createUser(data.username, data.password);
         playerId = newUser.id;
         username = newUser.username;
-        players[playerId] = { x: 0, y: 1, z: 0, rotY: 0, username, health: 100, lastAttackTime: 0 };
+        players[playerId] = { x: 0, y: 1, z: 0, rotY: 0, username, health: 100 };
         ws.send(JSON.stringify({ type: 'signup', success: true, id: playerId, username }));
         broadcastPlayers();
         return;
@@ -96,8 +87,7 @@ wss.on('connection', (ws) => {
         }
         playerId = user.id;
         username = user.username;
-        // Initialize player health and lastAttackTime if not present
-        players[playerId] = players[playerId] || { x: 0, y: 1, z: 0, rotY: 0, username, health: 100, lastAttackTime: 0 };
+        players[playerId] = players[playerId] || { x: 0, y: 1, z: 0, rotY: 0, username, health: 100 };
         ws.send(JSON.stringify({ type: 'login', success: true, id: playerId, username }));
         broadcastPlayers();
         return;
@@ -105,53 +95,49 @@ wss.on('connection', (ws) => {
 
       // Movement updates (only if logged in)
       if (data.type === 'move' && playerId && data.position) {
+        // Preserve existing health or set to 100 if missing
+        const currentHealth = (players[playerId] && players[playerId].health) || 100;
+
         players[playerId] = {
-          ...players[playerId],
           x: data.position.x,
           y: data.position.y,
           z: data.position.z,
           rotY: data.position.rotY || 0,
           username,
-          health: players[playerId].health ?? 100,
-          lastAttackTime: players[playerId].lastAttackTime ?? 0,
+          health: currentHealth,
         };
         broadcastPlayers();
       }
 
-      // Handle attack
-      // data: { type: 'attack', targetId: 'some-player-id' }
+      // Handle attack messages
       if (data.type === 'attack' && playerId && data.targetId) {
         const attacker = players[playerId];
         const target = players[data.targetId];
 
-        if (!attacker || !target) return;
+        if (attacker && target) {
+          // Check distance between attacker and target (3D distance)
+          const dx = attacker.x - target.x;
+          const dy = attacker.y - target.y;
+          const dz = attacker.z - target.z;
+          const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
 
-        const now = Date.now();
+          if (dist <= 4) { // Attack range threshold
+            // Reduce target health by 10
+            target.health = (target.health || 100) - 10;
 
-        // Check cooldown (1 second = 1000 ms)
-        if (now - attacker.lastAttackTime < 1000) {
-          // Cooldown active, ignore attack
-          ws.send(JSON.stringify({ type: 'attackResult', success: false, message: 'Sword is cooling down.' }));
-          return;
-        }
-
-        // Check distance <= attack range (e.g., 4 units)
-        if (distance(attacker, target) <= 4) {
-          // Deal damage
-          target.health = Math.max(0, (target.health || 100) - 10);
-
-          // Update attacker's lastAttackTime
-          attacker.lastAttackTime = now;
-
-          // Notify attacker success
-          ws.send(JSON.stringify({ type: 'attackResult', success: true, message: 'Hit!' }));
-
-          // Notify all clients of updated health
-          broadcastPlayers();
-
-          // Optional: If target health reaches 0, you can add logic for death or respawn here
-        } else {
-          ws.send(JSON.stringify({ type: 'attackResult', success: false, message: 'Target too far away.' }));
+            if (target.health <= 0) {
+              // Respawn target at random position with full health
+              target.x = Math.random() * 100 - 50;
+              target.y = 1;
+              target.z = Math.random() * 100 - 50;
+              target.health = 100;
+              console.log(`Player ${target.username} was defeated and respawned.`);
+            }
+            broadcastPlayers();
+          } else {
+            // Optionally notify attacker target is out of range or ignore
+            // ws.send(JSON.stringify({ type: 'error', message: 'Target out of range' }));
+          }
         }
       }
 
@@ -182,4 +168,3 @@ wss.on('connection', (ws) => {
 });
 
 console.log('WebSocket server running on port', process.env.PORT || 3000);
-
