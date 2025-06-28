@@ -26,7 +26,7 @@ function saveUsers() {
   });
 }
 
-const players = {}; // key: playerId -> { x, y, z, rotY, username, health }
+const players = {}; // In-memory player states keyed by id
 
 // Helper: find user by username
 function findUserByUsername(username) {
@@ -47,15 +47,6 @@ async function verifyPassword(user, password) {
   return bcrypt.compare(password, user.password_hash);
 }
 
-// Respawn a player at default spawn point with full health
-function respawnPlayer(id) {
-  players[id].x = 0;
-  players[id].y = 1;
-  players[id].z = 0;
-  players[id].rotY = 0;
-  players[id].health = 100;
-}
-
 wss.on('connection', (ws) => {
   let playerId = null;
   let username = null;
@@ -66,7 +57,7 @@ wss.on('connection', (ws) => {
     try {
       const data = JSON.parse(message);
 
-      // Signup
+      // Handle signup
       if (data.type === 'signup' && data.username && data.password) {
         const existingUser = findUserByUsername(data.username);
         if (existingUser) {
@@ -78,11 +69,10 @@ wss.on('connection', (ws) => {
         username = newUser.username;
         players[playerId] = { x: 0, y: 1, z: 0, rotY: 0, username, health: 100 };
         ws.send(JSON.stringify({ type: 'signup', success: true, id: playerId, username }));
-        broadcastPlayers();
         return;
       }
 
-      // Login
+      // Handle login
       if (data.type === 'login' && data.username && data.password) {
         const user = findUserByUsername(data.username);
         if (!user) {
@@ -96,51 +86,40 @@ wss.on('connection', (ws) => {
         }
         playerId = user.id;
         username = user.username;
-        if (!players[playerId]) {
-          players[playerId] = { x: 0, y: 1, z: 0, rotY: 0, username, health: 100 };
-        }
+        players[playerId] = players[playerId] || { x: 0, y: 1, z: 0, rotY: 0, username, health: 100 };
         ws.send(JSON.stringify({ type: 'login', success: true, id: playerId, username }));
-        broadcastPlayers();
         return;
       }
 
-      // Movement update
+      // Movement updates (only if logged in)
       if (data.type === 'move' && playerId && data.position) {
-        if (!players[playerId]) return;
-        players[playerId].x = data.position.x;
-        players[playerId].y = data.position.y;
-        players[playerId].z = data.position.z;
-        players[playerId].rotY = data.position.rotY || 0;
-        // health stays unchanged here
-        broadcastPlayers();
-        return;
+        const player = players[playerId];
+        if (player) {
+          player.x = data.position.x;
+          player.y = data.position.y;
+          player.z = data.position.z;
+          player.rotY = data.position.rotY || 0;
+          // health will be updated separately on attack events
+        }
       }
 
-      // Attack handling
+      // Handle attack events (example)
       if (data.type === 'attack' && playerId && data.targetId) {
-        if (!players[playerId] || !players[data.targetId]) return; // must be valid players
-
-        // Basic distance check for security: attacker must be close enough to target (e.g. <=4 units)
         const attacker = players[playerId];
         const target = players[data.targetId];
-        const dx = attacker.x - target.x;
-        const dy = attacker.y - target.y;
-        const dz = attacker.z - target.z;
-        const distSq = dx * dx + dy * dy + dz * dz;
-        if (distSq > 16) { // 4 squared = 16
-          // Ignore attack if too far
-          return;
+        if (attacker && target) {
+          // Simple distance check
+          const dx = attacker.x - target.x;
+          const dy = attacker.y - target.y;
+          const dz = attacker.z - target.z;
+          const dist = Math.sqrt(dx*dx + dy*dy + dz*dz);
+          if (dist <= 4) {
+            // Reduce target health by 10
+            target.health = (target.health || 100) - 10;
+            if (target.health < 0) target.health = 0;
+            // Optionally handle death, respawn here
+          }
         }
-
-        // Apply damage
-        target.health = (target.health || 100) - 10;
-        if (target.health <= 0) {
-          // Respawn target
-          respawnPlayer(data.targetId);
-        }
-
-        broadcastPlayers();
-        return;
       }
 
     } catch (e) {
@@ -152,22 +131,26 @@ wss.on('connection', (ws) => {
   ws.on('close', () => {
     if (playerId) {
       delete players[playerId];
-      broadcastPlayers();
     }
   });
-
-  function broadcastPlayers() {
-    const payload = JSON.stringify({
-      type: 'update',
-      players,
-    });
-    wss.clients.forEach((client) => {
-      if (client.readyState === WebSocket.OPEN) {
-        client.send(payload);
-      }
-    });
-  }
 });
+
+// Broadcast player states at fixed interval
+const BROADCAST_INTERVAL = 50; // ms (20 times per second)
+
+function broadcastPlayers() {
+  const payload = JSON.stringify({
+    type: 'update',
+    players,
+  });
+  wss.clients.forEach((client) => {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(payload);
+    }
+  });
+}
+
+setInterval(broadcastPlayers, BROADCAST_INTERVAL);
 
 console.log('WebSocket server running on port', process.env.PORT || 3000);
 
