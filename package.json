@@ -7,6 +7,7 @@
     "start": "node server.js"
   },
   "dependencies": {
+    "bcrypt": "^5.1.0",
     "pg": "^8.10.0",
     "ws": "^8.13.0",
     "uuid": "^9.0.0",
