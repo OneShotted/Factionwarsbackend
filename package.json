@@ -8,12 +8,11 @@
   },
   "dependencies": {
     "bcrypt": "^5.1.0",
-    "pg": "^8.10.0",
     "ws": "^8.13.0",
-    "uuid": "^9.0.0",
-    "@supabase/supabase-js": "^2.29.1"
+    "uuid": "^9.0.0"
   },
   "engines": {
     "node": ">=18"
   }
 }
+
